@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from unittest.mock import patch, MagicMock, AsyncMock, ANY
+from unittest.mock import patch, MagicMock, AsyncMock, ANY, PropertyMock
 
 import pytest
 
@@ -19,6 +19,7 @@ async def test_venus_data_loop_integration():
 
         mock_ammeter_instance = MockAmmeter.return_value
         mock_plc_instance = MockVenusPLC.return_value
+        type(mock_ammeter_instance).is_connected = PropertyMock(return_value=True)
 
         loop_task = asyncio.create_task(venus_data_loop("dummy_ip", 1234))
 
@@ -47,3 +48,22 @@ async def test_venus_data_loop_integration():
         with pytest.raises(asyncio.CancelledError):
             await loop_task
         mock_ammeter_instance.disconnect.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_venus_data_loop_connection_error():
+    with patch(MODULE_PATH + 'Ammeter', autospec=True) as MockAmmeter, \
+         patch(MODULE_PATH + 'VenusPLC', autospec=True) as MockVenusPLC:
+
+        mock_ammeter_instance = MockAmmeter.return_value
+        mock_plc_instance = MockVenusPLC.return_value
+        mock_ammeter_instance.connect.side_effect = ConnectionError()
+        type(mock_ammeter_instance).is_connected = PropertyMock(return_value=False)
+
+        loop_task = asyncio.create_task(venus_data_loop("dummy_ip", 1234))
+
+        await asyncio.sleep(0.01)
+        with pytest.raises(ConnectionError):
+            await loop_task
+        
+        mock_ammeter_instance.connect.assert_awaited_once()
+        assert mock_ammeter_instance.disconnect.call_count == 0

@@ -65,10 +65,10 @@ async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
         if consumer_task:
             consumer_task.cancel()
             await asyncio.gather(consumer_task, return_exceptions=True)
-        
-        logging.debug("Disconnecting Ammeter...")
-        await ammeter.disconnect()
-        logging.info("Ammeter disconnected. Exiting.")
+        if ammeter.is_connected:
+            logging.debug("Disconnecting Ammeter...")
+            await ammeter.disconnect()
+            logging.info("Ammeter disconnected. Exiting.")
 
 
 if __name__ == '__main__':

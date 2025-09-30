@@ -55,7 +55,11 @@ async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
         await asyncio.Future()
     
     except (KeyboardInterrupt, asyncio.CancelledError):
-        logging.info("Shutdown signal received.")
+        logging.info("Shutdown signal received, shutting down...")
+        raise
+    except Exception:
+        logging.info("An unknown exception occured, shutting down...")
+        raise
     finally:
         logging.info("Cleaning up resources...")
         if consumer_task:
@@ -65,7 +69,6 @@ async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
         logging.debug("Disconnecting Ammeter...")
         await ammeter.disconnect()
         logging.info("Ammeter disconnected. Exiting.")
-        raise 
 
 
 if __name__ == '__main__':

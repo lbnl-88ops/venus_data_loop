@@ -30,7 +30,6 @@ async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
     _log.info('Starting VENUS data loop')
     interval = 0.33
     consumer_task: asyncio.Task | None = None
-    current_queue = asyncio.Queue()
     # Devices
     ammeter = Ammeter(read_frequency_per_min=1000, ip=ammeter_ip, prompt='B2900A>',
                       port=ammeter_port, id='KeySight B2900A Faraday Cup')
@@ -43,14 +42,14 @@ async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
     current_measurement_aquisition = partial(time_average_current, average_seconds = interval)
 
     try:
-        _log.info('Setting up websocket...')
+        _log.info('Starting services...')
+        _log.debug('Setting up websocket...')
         await broadcaster.start()
-        _log.debug('Websocket set up...')
-
-        _log.info('Setting up data aquisition...')
+        _log.debug('Setting up data aquisition...')
         await aquisition_service.start(current_measurement_aquisition, interval)
+        _log.info('Services started.')
 
-        consumer_task = asyncio.create_task(consumer(aquisition_service._data_queue, venus_plc, broadcaster))        
+        consumer_task = asyncio.create_task(consumer(aquisition_service.data_queue, venus_plc, broadcaster))        
 
         await asyncio.Future()
     
@@ -64,12 +63,10 @@ async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
         logging.info("Cleaning up resources...")
         await aquisition_service.stop()
         await broadcaster.stop()
+
         if consumer_task:
             consumer_task.cancel()
             await asyncio.gather(consumer_task, return_exceptions=True)
-        if ammeter.is_connected:
-            logging.debug("Disconnecting Ammeter...")
-            logging.info("Ammeter disconnected. Exiting.")
 
 
 if __name__ == '__main__':

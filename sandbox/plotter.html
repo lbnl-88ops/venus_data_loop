@@ -69,12 +69,15 @@
     ];
 
     const layout = {
-        title: 'Live ECRIS Current Measurement',
-        xaxis: { title: 'Measurement Sequence' },
-        yaxis: { 
-            title: 'Current (A)', 
-            autorange: true 
-        },
+    title: 'Live ECRIS Current Measurement',
+    xaxis: { 
+        title: 'Timestamp',
+        type: 'date' // Tell Plotly to treat the x-axis as dates
+    },
+    yaxis: { 
+        title: 'Current (A)', 
+        autorange: true 
+    },
         // Dark theme styling for the plot itself
         plot_bgcolor: '#1e1e1e',
         paper_bgcolor: '#1e1e1e',
@@ -96,25 +99,22 @@
     socket.onmessage = function(event) {
         const measurement = JSON.parse(event.data);
         
-        // --- Add New Data to the Plotly Chart ---
+        // The Python time.time() is in seconds. JavaScript's Date object
+        // expects milliseconds, so we multiply by 1000.
+        const timestamp = new Date(measurement.timestamp * 1000);
         
-        // Plotly.extendTraces is the efficient way to add new data points.
-        // The data needs to be in a specific structure.
         const updateData = {
-            // New x-values for each trace (both get the same new x-value)
-            x: [[dataPointCounter], [dataPointCounter], [dataPointCounter]],
-            // New y-values for each trace (average for trace 0, stdev for trace 1)
-            y: [[measurement.average], [measurement.average*(1 + measurement.standard_deviation/100)], [measurement.average*(1 - measurement.standard_deviation/100)]]
+            // Use the new Date object for the x-axis
+            x: [[timestamp], [timestamp], [timestamp]], 
+            y: [[measurement.average], [measurement.average*(1 - measurement.standard_deviation/100)], [measurement.average*(1 + measurement.standard_deviation/100)]]
         };
         
-        // The indices of the traces to update (0 and 1)
         const traceIndices = [0, 1, 2];
 
-        // This is the magic: the 4th argument tells Plotly to keep only this many points.
-        // It automatically handles the "sliding window" for us.
         Plotly.extendTraces(chartDiv, updateData, traceIndices, MAX_DATA_POINTS);
-
-        dataPointCounter++;
+        
+        // We don't need the separate counter anymore
+        // dataPointCounter++; 
     };
 
     socket.onclose = function(event) {

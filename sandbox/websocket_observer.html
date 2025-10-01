@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ECRIS Data Viewer</title>
+    <style>
+        body { font-family: monospace; background-color: #1e1e1e; color: #d4d4d4; }
+        #status { padding: 10px; border-bottom: 1px solid #444; }
+        #output { padding: 10px; white-space: pre-wrap; font-size: 1.2em; }
+    </style>
+</head>
+<body>
+
+<div id="status">Connecting to server...</div>
+<pre id="output">Waiting for data...</pre>
+
+<script>
+    const statusDiv = document.getElementById('status');
+    const outputDiv = document.getElementById('output');
+
+    // Connect to the WebSocket server your Python script is running
+    const socket = new WebSocket("ws://127.0.0.1:8765");
+
+    socket.onopen = function(event) {
+        statusDiv.textContent = "✅ Connected to ws://127.0.0.1:8765";
+        statusDiv.style.color = "#4CAF50";
+    };
+
+    socket.onmessage = function(event) {
+        // The data from Python will be a JSON string
+        const data = JSON.parse(event.data);
+        
+        // Pretty-print the JSON object in the <pre> tag
+        outputDiv.textContent = JSON.stringify(data, null, 2);
+    };
+
+    socket.onclose = function(event) {
+        statusDiv.textContent = "❌ Disconnected from server. Will try to reconnect...";
+        statusDiv.style.color = "#F44336";
+        // Simple reconnect logic
+        setTimeout(() => window.location.reload(), 3000);
+    };
+
+    socket.onerror = function(error) {
+        statusDiv.textContent = "❌ Connection Error. Check console.";
+        statusDiv.style.color = "#F44336";
+        console.error("WebSocket Error:", error);
+    };
+</script>
+
+</body>
+</html>

@@ -18,10 +18,10 @@ from ops.ecris.services.data_aquisition import TelnetDataAquisition
 _log = logging.getLogger('ops')
 
 async def consumer(queue: asyncio.Queue, venus_plc: VenusPLC, websocket: WebSocketBroadcaster):
-    logging.info("Broadcaster started, waiting for data...")
+    _log.info("Consumer task started, waiting for data...")
     while True:
         measurement: CurrentMeasurement = await queue.get()
-        logging.debug(f"Received new measurement from {measurement.source}: Avg={measurement.average:.4e}, std={measurement.standard_deviation}")
+        _log.debug(f"Received new measurement from {measurement.source}: Avg={measurement.average:.4e}, std={measurement.standard_deviation:.2f}%")
         tasks = [update_plc_average_current(venus_plc, measurement), websocket.broadcast(measurement)]
         await asyncio.gather(*tasks)
         queue.task_done()
@@ -39,34 +39,35 @@ async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
     aquisition_service = TelnetDataAquisition(ammeter)
     broadcaster = WebSocketBroadcaster('127.0.0.1', 8765)
 
-    current_measurement_aquisition = partial(time_average_current, average_seconds = interval)
+    current_measurement_aquisition = partial(time_average_current, average_seconds=interval)
 
     try:
         _log.info('Starting services...')
-        _log.debug('Setting up websocket...')
         await broadcaster.start()
-        _log.debug('Setting up data aquisition...')
         await aquisition_service.start(current_measurement_aquisition, interval)
-        _log.info('Services started.')
+        _log.info('All services running.')
 
         consumer_task = asyncio.create_task(consumer(aquisition_service.data_queue, venus_plc, broadcaster))        
 
+        _log.info("Application is running. Press Ctrl+C to exit.")
         await asyncio.Future()
     
     except (KeyboardInterrupt, asyncio.CancelledError):
-        logging.info("Shutdown signal received, shutting down...")
+        _log.info("Shutdown signal received...")
         raise
     except Exception:
-        logging.info("An unknown exception occured, shutting down...")
+        _log.info("An unknown exception occured, shutting down...")
         raise
     finally:
-        logging.info("Cleaning up resources...")
-        await aquisition_service.stop()
-        await broadcaster.stop()
-
+        _log.info("Cleaning up resources...")
         if consumer_task:
             consumer_task.cancel()
             await asyncio.gather(consumer_task, return_exceptions=True)
+        
+        await aquisition_service.stop()
+        await broadcaster.stop()
+        
+        _log.info("Cleanup complete. Exiting.")
 
 
 if __name__ == '__main__':

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ECRIS Live Current Plot (Plotly)</title>
+    <!-- Include the Plotly.js library from its CDN -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #121212; 
+            color: #e0e0e0; 
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            margin: 0;
+        }
+        #status { 
+            padding: 10px; 
+            border-bottom: 1px solid #333; 
+            text-align: center;
+            flex-shrink: 0;
+            background-color: #1e1e1e;
+        }
+        #chart-container {
+            flex-grow: 1;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="status">Connecting to server...</div>
+<div id="chart-container">
+    <!-- This div is where the Plotly chart will be rendered -->
+    <div id="currentChart" style="width:100%;height:100%;"></div>
+</div>
+
+<script>
+    const statusDiv = document.getElementById('status');
+    const chartDiv = document.getElementById('currentChart');
+
+    const MAX_DATA_POINTS = 100; // Keep the last 100 points
+    let dataPointCounter = 0;
+
+    // --- Initial Plotly Chart Setup ---
+    const initialData = [
+        {
+            x: [],
+            y: [],
+            mode: 'lines',
+            name: 'Average Current (A)',
+            line: { color: '#1f77b4', width: 2 } // A standard Plotly blue
+        },
+        {
+            x: [],
+            y: [],
+            mode: 'lines',
+            name: '1-sigma (A)',
+            line: { color: '#ff7f0e', width: 1, dash: 'dash' } // A standard Plotly orange
+        },
+        { 
+            x: [],
+            y: [],
+            mode: 'lines',
+            name: '1-sigma(A)',
+            line: { color: '#ff7f0e', width: 1, dash: 'dash' } // A standard Plotly orange
+        }
+    ];
+
+    const layout = {
+        title: 'Live ECRIS Current Measurement',
+        xaxis: { title: 'Measurement Sequence' },
+        yaxis: { 
+            title: 'Current (A)', 
+            autorange: true 
+        },
+        // Dark theme styling for the plot itself
+        plot_bgcolor: '#1e1e1e',
+        paper_bgcolor: '#1e1e1e',
+        font: { color: '#e0e0e0' }
+    };
+
+    // Create the initial empty plot
+    Plotly.newPlot(chartDiv, initialData, layout);
+
+
+    // --- WebSocket Connection Logic ---
+    const socket = new WebSocket("ws://127.0.0.1:8765");
+
+    socket.onopen = function(event) {
+        statusDiv.textContent = "✅ Connected to ws://127.0.0.1:8765";
+        statusDiv.style.color = "#4CAF50";
+    };
+
+    socket.onmessage = function(event) {
+        const measurement = JSON.parse(event.data);
+        
+        // --- Add New Data to the Plotly Chart ---
+        
+        // Plotly.extendTraces is the efficient way to add new data points.
+        // The data needs to be in a specific structure.
+        const updateData = {
+            // New x-values for each trace (both get the same new x-value)
+            x: [[dataPointCounter], [dataPointCounter], [dataPointCounter]],
+            // New y-values for each trace (average for trace 0, stdev for trace 1)
+            y: [[measurement.average], [measurement.average*(1 + measurement.standard_deviation/100)], [measurement.average*(1 - measurement.standard_deviation/100)]]
+        };
+        
+        // The indices of the traces to update (0 and 1)
+        const traceIndices = [0, 1, 2];
+
+        // This is the magic: the 4th argument tells Plotly to keep only this many points.
+        // It automatically handles the "sliding window" for us.
+        Plotly.extendTraces(chartDiv, updateData, traceIndices, MAX_DATA_POINTS);
+
+        dataPointCounter++;
+    };
+
+    socket.onclose = function(event) {
+        statusDiv.textContent = "❌ Disconnected from server. Will try to reconnect...";
+        statusDiv.style.color = "#F44336";
+        setTimeout(() => window.location.reload(), 3000);
+    };
+
+    socket.onerror = function(error) {
+        statusDiv.textContent = "❌ Connection Error. Check console.";
+        statusDiv.style.color = "#F44336";
+        console.error("WebSocket Error:", error);
+    };
+</script>
+
+</body>
+</html>

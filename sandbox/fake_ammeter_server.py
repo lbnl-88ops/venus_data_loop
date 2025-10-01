@@ -2,6 +2,7 @@ import asyncio
 import logging
 import math
 import itertools
+import random
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - SERVER - %(levelname)s - %(message)s')
 
@@ -30,7 +31,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             response = None
 
             if 'meas:curr?' in command: 
-                current_value = 1e-6 + 5e-7 * math.sin(next(step_counter) * 0.1)
+                current_value = 100 + 50 * math.sin(next(step_counter) * 0.1) + 5*random.gauss(0, 10)
                 response = f'{PROMPT}      {current_value:+E}\r\n'.encode('ascii') 
                 logging.info(f"Sending data: {response.decode().strip()}")
 

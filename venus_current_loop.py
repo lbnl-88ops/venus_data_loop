@@ -1,5 +1,3 @@
-import threading
-from functools import partial
 import asyncio
 import logging
 from argparse import ArgumentParser
@@ -8,12 +6,9 @@ from argparse import ArgumentParser
 from ops.ecris.devices.venus_plc import VENUSController
 
 from ops.ecris.devices import Ammeter, VenusPLC
-from ops.ecris.operations.producers import time_average_current
-from ops.ecris.data.producer_thread import producer_thread
 from ops.ecris.tasks.device_broadcasters import update_plc_average_current
 from ops.ecris.model.measurement import CurrentMeasurement
-from ops.ecris.tasks.websocket_broadcaster import WebSocketBroadcaster
-from ops.ecris.services.data_aquisition import TelnetDataAquisition
+from ops.ecris.services import WebSocketBroadcaster, AverageCurrentAcquisitionService
 
 _log = logging.getLogger('ops')
 
@@ -28,7 +23,7 @@ async def consumer(queue: asyncio.Queue, venus_plc: VenusPLC, websocket: WebSock
 
 async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
     _log.info('Starting VENUS data loop')
-    interval = 0.33
+    average_interval = 0.33
     consumer_task: asyncio.Task | None = None
     # Devices
     ammeter = Ammeter(read_frequency_per_min=1000, ip=ammeter_ip, prompt='B2900A>',
@@ -36,18 +31,18 @@ async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
     venus_plc = VenusPLC(VENUSController(read_only=False))    
     
     # Services
-    aquisition_service = TelnetDataAquisition(ammeter)
+    acquisition_service = AverageCurrentAcquisitionService(ammeter)
     broadcaster = WebSocketBroadcaster('127.0.0.1', 8765)
-
-    current_measurement_aquisition = partial(time_average_current, average_seconds=interval)
 
     try:
         _log.info('Starting services...')
         await broadcaster.start()
-        await aquisition_service.start(current_measurement_aquisition, interval)
+        await acquisition_service.start()
         _log.info('All services running.')
+        if acquisition_service.data_queue is None:
+            raise RuntimeError('Acquisition service appears to have failed to start.')
 
-        consumer_task = asyncio.create_task(consumer(aquisition_service.data_queue, venus_plc, broadcaster))        
+        consumer_task = asyncio.create_task(consumer(acquisition_service.data_queue, venus_plc, broadcaster))        
 
         _log.info("Application is running. Press Ctrl+C to exit.")
         await asyncio.Future()
@@ -64,7 +59,7 @@ async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
             consumer_task.cancel()
             await asyncio.gather(consumer_task, return_exceptions=True)
         
-        await aquisition_service.stop()
+        await acquisition_service.stop()
         await broadcaster.stop()
         
         _log.info("Cleanup complete. Exiting.")

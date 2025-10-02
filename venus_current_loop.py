@@ -46,7 +46,7 @@ async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
     avg_ws = WebSocketBroadcaster('127.0.0.1', 8765)
     raw_ws = WebSocketBroadcaster('127.0.0.1', 8766)
 
-    raw_data_input_queue = current_service.distributor.subscribe()
+    raw_data_input_queue = current_service.subscribe()
     averaged_data_input_queue = average_service.data_queue
 
     try:

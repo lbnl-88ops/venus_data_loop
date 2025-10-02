@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ECRIS Live Current Plot (Plotly)</title>
+    <title>ECRIS Live Dashboard</title>
     <!-- Include the Plotly.js library from its CDN -->
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
@@ -14,120 +14,137 @@
             flex-direction: column;
             height: 100vh;
             margin: 0;
+            overflow: hidden; /* Prevent scrolling */
         }
-        #status { 
+        #status-container { 
             padding: 10px; 
             border-bottom: 1px solid #333; 
             text-align: center;
             flex-shrink: 0;
             background-color: #1e1e1e;
+            display: flex;
+            justify-content: space-around;
         }
-        #chart-container {
+        .status-message {
+            flex-basis: 50%;
+        }
+        .chart-container {
             flex-grow: 1;
             padding: 10px;
+            min-height: 0; /* Important for flexbox shrinking */
         }
     </style>
 </head>
 <body>
 
-<div id="status">Connecting to server...</div>
-<div id="chart-container">
-    <!-- This div is where the Plotly chart will be rendered -->
-    <div id="currentChart" style="width:100%;height:100%;"></div>
+<div id="status-container">
+    <div id="avgStatus" class="status-message">Connecting to Average Current...</div>
+    <div id="rawStatus" class="status-message">Connecting to Raw Current...</div>
+</div>
+
+<div class="chart-container">
+    <div id="averageChart" style="width:100%;height:100%;"></div>
+</div>
+<div class="chart-container">
+    <div id="rawChart" style="width:100%;height:100%;"></div>
 </div>
 
 <script>
-    const statusDiv = document.getElementById('status');
-    const chartDiv = document.getElementById('currentChart');
+    // --- Reusable Plot Setup Function ---
+    function setupPlot(config) {
+        const statusDiv = document.getElementById(config.statusDivId);
+        const chartDiv = document.getElementById(config.chartDivId);
 
-    const MAX_DATA_POINTS = 100; // Keep the last 100 points
-    let dataPointCounter = 0;
+        // Create the initial empty plot
+        Plotly.newPlot(chartDiv, config.plotData, config.plotLayout);
 
-    // --- Initial Plotly Chart Setup ---
-    const initialData = [
-        {
-            x: [],
-            y: [],
-            mode: 'lines',
-            name: 'Average Current (A)',
-            line: { color: '#1f77b4', width: 2 } // A standard Plotly blue
-        },
-        {
-            x: [],
-            y: [],
-            mode: 'lines',
-            name: '1-sigma (A)',
-            line: { color: '#ff7f0e', width: 1, dash: 'dash' } // A standard Plotly orange
-        },
-        { 
-            x: [],
-            y: [],
-            mode: 'lines',
-            name: '1-sigma(A)',
-            line: { color: '#ff7f0e', width: 1, dash: 'dash' } // A standard Plotly orange
-        }
-    ];
+        // --- WebSocket Connection Logic ---
+        const socket = new WebSocket(`ws://127.0.0.1:${config.port}`);
 
-    const layout = {
-    title: 'Live ECRIS Current Measurement',
-    xaxis: { 
-        title: 'Timestamp',
-        type: 'date' // Tell Plotly to treat the x-axis as dates
-    },
-    yaxis: { 
-        title: 'Current (A)', 
-        autorange: true 
-    },
-        // Dark theme styling for the plot itself
-        plot_bgcolor: '#1e1e1e',
-        paper_bgcolor: '#1e1e1e',
-        font: { color: '#e0e0e0' }
-    };
-
-    // Create the initial empty plot
-    Plotly.newPlot(chartDiv, initialData, layout);
-
-
-    // --- WebSocket Connection Logic ---
-    const socket = new WebSocket("ws://127.0.0.1:8765");
-
-    socket.onopen = function(event) {
-        statusDiv.textContent = "✅ Connected to ws://127.0.0.1:8765";
-        statusDiv.style.color = "#4CAF50";
-    };
-
-    socket.onmessage = function(event) {
-        const measurement = JSON.parse(event.data);
-        
-        // The Python time.time() is in seconds. JavaScript's Date object
-        // expects milliseconds, so we multiply by 1000.
-        const timestamp = new Date(measurement.timestamp * 1000);
-        
-        const updateData = {
-            // Use the new Date object for the x-axis
-            x: [[timestamp], [timestamp], [timestamp]], 
-            y: [[measurement.average], [measurement.average*(1 - measurement.standard_deviation/100)], [measurement.average*(1 + measurement.standard_deviation/100)]]
+        socket.onopen = function(event) {
+            statusDiv.textContent = `✅ Connected to ${config.title} on port ${config.port}`;
+            statusDiv.style.color = "#4CAF50";
         };
-        
-        const traceIndices = [0, 1, 2];
 
-        Plotly.extendTraces(chartDiv, updateData, traceIndices, MAX_DATA_POINTS);
-        
-        // We don't need the separate counter anymore
-        // dataPointCounter++; 
+        socket.onmessage = function(event) {
+            const measurement = JSON.parse(event.data);
+            // Use the specific update logic provided in the config
+            const updateData = config.updateFunction(measurement);
+            Plotly.extendTraces(chartDiv, updateData, config.traceIndices, config.maxPoints);
+        };
+
+        socket.onclose = function(event) {
+            statusDiv.textContent = `❌ Disconnected from port ${config.port}. Will try to reconnect...`;
+            statusDiv.style.color = "#F44336";
+            setTimeout(() => window.location.reload(), 5000); // Stagger reloads
+        };
+
+        socket.onerror = function(error) {
+            statusDiv.textContent = `❌ Error on port ${config.port}. Check console.`;
+            statusDiv.style.color = "#F44336";
+            console.error(`WebSocket Error on port ${config.port}:`, error);
+        };
+    }
+
+    // --- Configuration for the Average Current Plot ---
+    const avgPlotConfig = {
+        port: 8765,
+        title: "Average Current",
+        chartDivId: 'averageChart',
+        statusDivId: 'avgStatus',
+        maxPoints: 100,
+        traceIndices: [0, 1, 2],
+        plotData: [
+            { x: [], y: [], mode: 'lines', name: 'Average (A)', line: { color: '#1f77b4', width: 2 } },
+            { x: [], y: [], mode: 'lines', name: 'Lower Bound', line: { width: 0 }, showlegend: false },
+            { x: [], y: [], mode: 'lines', name: 'Upper Bound (1-sigma)', line: { width: 0 }, fill: 'tonexty', fillcolor: 'rgba(31,119,180,0.3)', showlegend: true }
+        ],
+        plotLayout: {
+            title: 'Time-Averaged Current',
+            xaxis: { title: 'Timestamp', type: 'date' },
+            yaxis: { title: 'Current (A)', autorange: true },
+            plot_bgcolor: '#1e1e1e', paper_bgcolor: '#1e1e1e', font: { color: '#e0e0e0' },
+            margin: { l: 60, r: 30, b: 50, t: 50 } // Tighter margins
+        },
+        updateFunction: function(m) {
+            const timestamp = new Date(m.timestamp * 1000);
+            const std_fraction = m.standard_deviation / 100.0;
+            // Use Math.max to prevent non-positive values for the log scale
+            const lower_bound = Math.max(m.average * (1 - std_fraction), 1e-12); 
+            const upper_bound = m.average * (1 + std_fraction);
+            return {
+                x: [[timestamp], [timestamp], [timestamp]], 
+                y: [[m.average], [lower_bound], [upper_bound]]
+            };
+        }
     };
 
-    socket.onclose = function(event) {
-        statusDiv.textContent = "❌ Disconnected from server. Will try to reconnect...";
-        statusDiv.style.color = "#F44336";
-        setTimeout(() => window.location.reload(), 3000);
+    // --- Configuration for the Raw Current Plot ---
+    const rawPlotConfig = {
+        port: 8766,
+        title: "Raw Current",
+        chartDivId: 'rawChart',
+        statusDivId: 'rawStatus',
+        maxPoints: 500, // Show more raw data points
+        traceIndices: [0],
+        plotData: [{ x: [], y: [], mode: 'lines', name: 'Raw Current (A)', line: { color: '#ff7f0e', width: 1 } }],
+        plotLayout: {
+            title: 'Raw Ammeter Signal',
+            xaxis: { title: 'Timestamp', type: 'date' },
+            yaxis: { title: 'Current (A)', autorange: true }, // Linear scale for raw data
+            plot_bgcolor: '#1e1e1e', paper_bgcolor: '#1e1e1e', font: { color: '#e0e0e0' },
+            margin: { l: 60, r: 30, b: 50, t: 50 }
+        },
+        updateFunction: function(m) {
+            const timestamp = new Date(m.timestamp * 1000);
+            return { x: [[timestamp]], y: [[m.value]] };
+        }
     };
 
-    socket.onerror = function(error) {
-        statusDiv.textContent = "❌ Connection Error. Check console.";
-        statusDiv.style.color = "#F44336";
-        console.error("WebSocket Error:", error);
-    };
+    // --- Initialize both plots ---
+    setupPlot(avgPlotConfig);
+    setupPlot(rawPlotConfig);
+
 </script>
 
 </body>

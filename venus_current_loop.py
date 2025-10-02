@@ -4,64 +4,85 @@ from argparse import ArgumentParser
 
 #from venus_data_project import VenusController
 from ops.ecris.devices.venus_plc import VENUSController
-
+from ops.ecris.model.measurement import Measurement
 from ops.ecris.devices import Ammeter, VenusPLC
 from ops.ecris.tasks.device_broadcasters import update_plc_average_current
-from ops.ecris.model.measurement import CurrentMeasurement
-from ops.ecris.services import WebSocketBroadcaster, AverageCurrentAcquisitionService
+from ops.ecris.services import WebSocketBroadcaster
+from ops.ecris.services.ammeter import CurrentAcquisitionService, AverageCurrentService
 
 _log = logging.getLogger('ops')
 
-async def consumer(queue: asyncio.Queue, venus_plc: VenusPLC, websocket: WebSocketBroadcaster):
-    _log.info("Consumer task started, waiting for data...")
+async def broadcaster_consumer(queue: asyncio.Queue, websocket: WebSocketBroadcaster):
+    """Generic consumer that broadcasts any measurement."""
     while True:
-        measurement: CurrentMeasurement = await queue.get()
-        _log.debug(f"Received new measurement from {measurement.source}: Avg={measurement.average:.4e}, std={measurement.standard_deviation:.2f}%")
-        tasks = [update_plc_average_current(venus_plc, measurement), websocket.broadcast(measurement)]
+        measurement: Measurement = await queue.get()
+        await websocket.broadcast(measurement)
+        queue.task_done()
+
+async def average_consumer(queue: asyncio.Queue, venus_plc: VenusPLC, websocket: WebSocketBroadcaster):
+    """Specialized consumer for averaged data."""
+    _log.info("Average consumer started, waiting for data...")
+    while True:
+        measurement: Measurement = await queue.get()
+        tasks = [
+            venus_plc.write_data(VenusPLC.DataKeys.AVERAGE_CURRENT, measurement.average),
+            venus_plc.write_data(VenusPLC.DataKeys.CURRENT_STDEV, measurement.standard_deviation),
+            websocket.broadcast(measurement)
+        ]
         await asyncio.gather(*tasks)
         queue.task_done()
 
 async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
     _log.info('Starting VENUS data loop')
     average_interval = 0.33
-    consumer_task: asyncio.Task | None = None
-    # Devices
+    
     ammeter = Ammeter(read_frequency_per_min=1000, ip=ammeter_ip, prompt='B2900A>',
                       port=ammeter_port, id='KeySight B2900A Faraday Cup')
-    venus_plc = VenusPLC(VENUSController(read_only=False))    
+    venus_plc = VenusPLC(VENUSController(read_only=False))
     
-    # Services
-    acquisition_service = AverageCurrentAcquisitionService(ammeter)
-    broadcaster = WebSocketBroadcaster('127.0.0.1', 8765)
+    current_service = CurrentAcquisitionService(ammeter)
+    average_service = AverageCurrentService(current_service, average_interval)
+
+    avg_ws = WebSocketBroadcaster('127.0.0.1', 8765)
+    raw_ws = WebSocketBroadcaster('127.0.0.1', 8766)
+
+    raw_data_input_queue = current_service.distributor.subscribe()
+    averaged_data_input_queue = average_service.data_queue
 
     try:
         _log.info('Starting services...')
-        await broadcaster.start()
-        await acquisition_service.start()
+        # Initial services
+        await asyncio.gather(
+            raw_ws.start(),
+            avg_ws.start()
+        )
+        # Data collection services 
+        await current_service.start()
+        
         _log.info('All services running.')
-        if acquisition_service.data_queue is None:
-            raise RuntimeError('Acquisition service appears to have failed to start.')
 
-        consumer_task = asyncio.create_task(consumer(acquisition_service.data_queue, venus_plc, broadcaster))        
-
+        # Processing services
+        tasks = [
+            average_service.start(), 
+            average_consumer(averaged_data_input_queue, venus_plc, avg_ws),
+            broadcaster_consumer(raw_data_input_queue, raw_ws)
+        ]
         _log.info("Application is running. Press Ctrl+C to exit.")
-        await asyncio.Future()
+        await asyncio.gather(*tasks)
     
     except (KeyboardInterrupt, asyncio.CancelledError):
         _log.info("Shutdown signal received...")
-        raise
     except Exception:
-        _log.info("An unknown exception occured, shutting down...")
-        raise
+        _log.exception("An unknown exception occurred, shutting down...")
     finally:
         _log.info("Cleaning up resources...")
-        if consumer_task:
-            consumer_task.cancel()
-            await asyncio.gather(consumer_task, return_exceptions=True)
-        
-        await acquisition_service.stop()
-        await broadcaster.stop()
-        
+        # Stop everything gracefully
+        await asyncio.gather(
+            current_service.stop(),
+            raw_ws.stop(),
+            avg_ws.stop(),
+            return_exceptions=True
+        )
         _log.info("Cleanup complete. Exiting.")
 
 

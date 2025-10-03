@@ -32,10 +32,12 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
             if 'meas:curr?' in command: 
                 current_value = 100 + 50 * math.sin(next(step_counter) * 0.1) + 5*random.gauss(0, 10)
-                response = f'{PROMPT}      {current_value:+E}\r\n'.encode('ascii') 
-                logging.info(f"Sending data: {response.decode().strip()}")
+                response = f'{current_value:+E}\r\n'.encode('ascii') 
 
+            logging.info("Sending echo")
+            writer.write(f'{PROMPT} {command}\r\n'.encode('ascii'))
             if response:
+                logging.info(f"Sending data: {response.decode().strip()}")
                 writer.write(response)
 
             await writer.drain()

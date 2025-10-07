@@ -46,8 +46,14 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         logging.warning("Client connection reset.")
     finally:
         logging.info(f"Closing connection for {client_addr}")
-        writer.close()
-        await writer.wait_closed()
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except BrokenPipeError:
+            logging.info(f"Connection for {client_addr} was already broken. Closed forcefully.")
+            # We don't need to do anything else, the connection is already gone.
+            pass
+
 
 
 async def main():

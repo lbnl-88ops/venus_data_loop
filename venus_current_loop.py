@@ -1,16 +1,26 @@
 import asyncio
 import logging
 from argparse import ArgumentParser
+import json
 
 #from venus_data_project import VenusController
 from ops.ecris.devices.venus_plc import VENUSController
-from ops.ecris.model.measurement import Measurement
+from ops.ecris.model.measurement import Measurement, MultiValueMeasurement
 from ops.ecris.devices import Ammeter, VenusPLC
 from ops.ecris.tasks.device_broadcasters import update_plc_average_current
 from ops.ecris.services import WebSocketBroadcaster
 from ops.ecris.services.ammeter import CurrentAcquisitionService, AverageCurrentService
+from ops.ecris.services.venus_plc import PLCDataAquisitionService
 
 _log = logging.getLogger('ops')
+
+async def broadcast_venus_data(queue: asyncio.Queue, websocket: WebSocketBroadcaster):
+    while True:
+        data: MultiValueMeasurement = await queue.get()
+        output_data = data.values
+        output_data['timestamp'] = data.timestamp
+        await websocket.broadcast(json.dumps(output_data))
+        queue.task_done()
 
 async def broadcaster_consumer(queue: asyncio.Queue, websocket: WebSocketBroadcaster):
     """Generic consumer that broadcasts any measurement."""
@@ -42,9 +52,11 @@ async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
     
     current_service = CurrentAcquisitionService(ammeter)
     average_service = AverageCurrentService(current_service, average_interval)
+    venus_data_service = PLCDataAquisitionService(venus_plc)
 
     avg_ws = WebSocketBroadcaster('127.0.0.1', 8765)
     raw_ws = WebSocketBroadcaster('127.0.0.1', 8766)
+    venus_ws = WebSocketBroadcaster('127.0.0.1', 8767)
 
     raw_data_input_queue = current_service.subscribe()
     averaged_data_input_queue = average_service.data_queue
@@ -54,18 +66,21 @@ async def venus_data_loop(ammeter_ip: str, ammeter_port: int):
         # Initial services
         await asyncio.gather(
             raw_ws.start(),
-            avg_ws.start()
+            avg_ws.start(),
+            venus_ws.start(),
         )
         # Data collection services 
         await current_service.start()
-        
+        await venus_data_service.start()
+
         _log.info('All services running.')
 
         # Processing services
         tasks = [
             average_service.start(), 
             average_consumer(averaged_data_input_queue, venus_plc, avg_ws),
-            broadcaster_consumer(raw_data_input_queue, raw_ws)
+            broadcaster_consumer(raw_data_input_queue, raw_ws),
+            broadcast_venus_data(venus_data_service.data_queue, venus_ws)
         ]
         _log.info("Application is running. Press Ctrl+C to exit.")
         await asyncio.gather(*tasks)

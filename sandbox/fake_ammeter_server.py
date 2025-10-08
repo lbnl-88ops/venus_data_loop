@@ -35,10 +35,11 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 response = f'{current_value:+E}\r\n'.encode('ascii') 
 
             logging.info("Sending echo")
-            writer.write(f'{PROMPT} {command}\r\n'.encode('ascii'))
+            writer.write(f'{command}\r\n'.encode('ascii'))
             if response:
                 logging.info(f"Sending data: {response.decode().strip()}")
                 writer.write(response)
+            writer.write(f'{PROMPT}\r\n'.encode('ascii'))
 
             await writer.drain()
 

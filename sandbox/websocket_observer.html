@@ -19,10 +19,10 @@
     const outputDiv = document.getElementById('output');
 
     // Connect to the WebSocket server your Python script is running
-    const socket = new WebSocket("ws://127.0.0.1:8765");
+    const socket = new WebSocket("ws://127.0.0.1:8767");
 
     socket.onopen = function(event) {
-        statusDiv.textContent = "✅ Connected to ws://127.0.0.1:8765";
+        statusDiv.textContent = "✅ Connected to ws://127.0.0.1:8767";
         statusDiv.style.color = "#4CAF50";
     };
 
